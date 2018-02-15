@@ -1,7 +1,15 @@
-#   FileName:   girlsgambleinjune_bigpy_nofxns_fxn6fixtxt.py
+#   FileName:   girlsgambleinjune_bigpy_nofxns_reverted-and-debugged_TUBMAN.py
 #   Info:       gambling with peartree logic (two cues, recency of distractor is 1 or 2 and recency of correct cue is anything else)
 #   Author:     Hannah Joo
 #   Date:       7/29/2017
+
+# This file was modified by CGB and HL on 2/12/18. 
+# This began because HL and CGB noticed a bug: when poking at target well, distractor well would not turn off.
+# HL says 'weirdly when we are testing, this bug didn’t show up, but showed up this bug: when poking home and back at the same time, the new trial won’t start, maybe two bugs are triggered by different things but because of the same code?'
+# HL and CGB looked through old scripts and found one that worked: HXdebug_notone_Tubman. I don't know the history of this script either.
+# Using 'diffchecker' online, HL matched all the differences in 'reverted_and_debugged' to HXdebug_notone_Tubman except for the recency selection criterion and reward function.
+# HL observed that one difference is correctwell==homewell was not followed by sys.stdout.flush(). Not sure where. (HX: line 269-274, not only sys.stdout.flush is missing, but also three prints, so I guess maybe when deleting the prints, also mistakenly deleted sys) Somehow that got deleted. It is restored in this version and likely accounts for the bugs.
+
 
 # IMPORTS
  
@@ -40,7 +48,7 @@ lockout = 1              # Choicetimers threshold set here! Currently statescrip
 lickedwell = 7              # Well that was just licked. 0-indexed for logical checks.
 leftcorrect = 0             # Raise when choicetimers = 0 (lockout period reached) and thistrialcorrect = 1, used to play tone
 deliveredreward = 0			# tracks when reward has been delivered at home to prevent multiple deliveries
-deliveredwell=0				# State variable added by HX and CGB to debug script
+deliveredwell=6				# State variable added by HX and CGB to debug script
 
 #   RECENCY TRACKING VARIABLES - set to 100 for initialization (because 100 will never happen organically)
 rv = [101, 101, 101, 101, 101, 101] #1 is n-1 visited, 2 is n-2, etc., order is [rv1, rv2, rv3, rv4, rv5, rv6] 
@@ -259,6 +267,11 @@ def callback(line):
 			sys.stdout.flush()
 
 			if correctwell == homewell: # Home well trigger is done correctly
+				trial = trial + 1 		
+				print('starting trial number:', trial)		
+				print('total correct trials:', corrects)		
+				print('recency variables:', rv)		
+				sys.stdout.flush()
 
 				# The following is just for cue jitter to work properly. Same as choicetimers, where relicking starts the jitter timer over again.
 				print("cueon", cueon)
@@ -266,6 +279,10 @@ def callback(line):
 				sys.stdout.flush()
 
 				# if cueon == 0: formerly this was here, but it prevents incrementing on licks after the first.
+				#if deliveredwell == 6:		
+
+## added by CGB to fix the following bug: if home well was licked during reward delivery at back well, home well triggers would inappropriately trigger(1) (e.g. statescript function 1 that increments  numtimers)... this prevented numtimers from ever equaling zero, which is a contingency required for python to run the setwells_rv function. therefore, this was generating a bug where cue wells were never set and cue lights would not turn on. CGB and HX added this contingency (deliveredwell == 6) to 'SCQTMESSAGE: trigger(1)' so that reward delivery at backwell has to be complete before python can tell sc to increment numtimers. this fix allows numtimers to get set to zero so that python can run the setwells_rv function properly despite home well triggers during reward delivery at backwell (phew!)
+## unable it because it seems adding new bugs				
 				if isinbound == 0:
 					print("SCQTMESSAGE: trigger(1);\n") # increments numtimers in sc
 					sys.stdout.flush()
@@ -514,8 +531,8 @@ def callback(line):
 		if thistrialcorrect == 1:
 			leftcorrect = 1
 			print('leftcorrect:', leftcorrect)
-			co.PLAYTONE = 1
-			print("set co.PLAYTONE=1")
+			#co.PLAYTONE = 1
+			#print("set co.PLAYTONE=1")
 			sys.stdout.flush()
 
 			print("lickedwell:", lickedwell)
