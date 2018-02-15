@@ -1,0 +1,698 @@
+#   FileName:   girlsgambleinjune_bigpy_nofxns_fxn6fixtxt.py
+#   Info:       gambling with peartree logic (two cues, recency of distractor is 1 or 2 and recency of correct cue is anything else)
+#   Author:     Hannah Joo
+#   Date:       7/29/2017
+
+# IMPORTS
+ 
+import sys
+import random
+import math
+import numpy as np
+import threading
+import time
+import pyaudio
+import scipy as sp
+from multi_thread_chirp_x4hj2_gamble_070816 import * # this script manages the tone.
+#from minustimers import * #import the decrementing functions for choicetimers and numtimers
+
+
+######### initialize variables ####################################################################################################################################################
+#   FILE NAME
+version = 10
+print("python callback version:", version)
+
+#   PARAMETER VARIABLES
+jitter = 0.999            # Jitter time(ms) at home, for cue onset (reassigned before first trial)
+rewardlength = 0.999          # Reward length(ms) outbound (reassigned before first trial)
+rewardlengthmini = 0.150      # Reward length(ms) outbound for any correct trial, before wait-proportional reward delivered
+rewardlengthhome = 0.350      # Reward length(ms) homebound 
+rewardlengthback = 0.999      # Reward length(ms) backboned (reassigned before first trial)
+rewardlengthbackmini = 0
+rewarddelay = 0.5           # Delay(ms) outbound (reassigned before first trial)
+rewarddelayhome = 0.5       # Delay(ms) before reward is issued after home nosepoke
+rewarddelayback = 0.5       # Delay(ms) before reward is issued after back nosepoke
+cuelength = 30           # Number of centiseconds cue light stays on (right now it's very very long)
+backnum = 6                 # Portin & portout of back well. 0-indexed.
+choicetimers = 0            # Raise choicetimers to track wait time at choice well
+backbaited = 0              # Raise backbaited after animal leaves correct choice well and is on the way to back; prevents multiple stops on the way back
+lockout = 1              # Choicetimers threshold set here! Currently statescript uses its internal lockout variable; py doesn't reset it
+lickedwell = 7              # Well that was just licked. 0-indexed for logical checks.
+leftcorrect = 0             # Raise when choicetimers = 0 (lockout period reached) and thistrialcorrect = 1, used to play tone
+deliveredreward = 0			# tracks when reward has been delivered at home to prevent multiple deliveries
+deliveredwell=0				# State variable added by HX and CGB to debug script
+
+#   RECENCY TRACKING VARIABLES - set to 100 for initialization (because 100 will never happen organically)
+rv = [101, 101, 101, 101, 101, 101] #1 is n-1 visited, 2 is n-2, etc., order is [rv1, rv2, rv3, rv4, rv5, rv6] 
+
+
+#   CALCULATION VARIABLES
+backwell = 6            # Python 0-indexed for checking for correct behavior, then converted in SCQT message to SC index to flip well light.
+homewell = 7            # Python 0-indexed for checking for correct behavior, then converted in SCQT message to SC index to flip well light.
+correctpump = 16            # Correct output pump (initialize to home well pump). Always SC-readable, 1-indexed.
+correctpumpthistrial = 16       # Correct output pump. Always SC-readable, 1-indexed.
+correctwell = 7         # Correct output well (initialize to home well). 0-indexed.
+correctwellthistrial = 7        # Correct output well, held after reassignment of correctwell=backnum on unlick in fxn 7 for lowering backbaited if other well licked between choice and back. 0-indexed.
+cuey = 0                # Cued LED of rewarded well. This is decided by python script every trial.
+cuen = 0                # Cued LED of unrewarded well. This is decided by python script every trial.
+
+#   STATE VARIABLES
+cueon = 0               # Cue light switch
+homeon = 0              # Home light switch
+backon = 0              # Back light switch
+
+deliveringreward = 0        # Raised when reward is being delivered
+isinbound = 0           # Raised during inbound portion of trial to prevent multiple outbound pokes
+numtimers = 0           # A variable to keep track of home jitter time
+print("numtimers init:", numtimers)
+sys.stdout.flush()
+thistrialcorrect = 0        # Raised when the most recent trial was correct
+
+
+#   INCREMENTING VARIABLES
+trial = 0               # Current trial num
+corrects = 0            # Counter for correct trials
+hits = [0,0,0,0,0,0]    # Counter for correct well hits, order is wells 1-6 
+
+##########################################################################################################################################################################
+
+# initialization in python turns on the home light - check carefully that this will run only once (which it should.)
+
+#homewell = 7
+print("SCQTMESSAGE: portout[%d] = flip;\n" % (homewell+1)) #convert homewell to sc-readable 1-indexed.
+sys.stdout.flush()
+homeon = 1 #set tracking variable for the off/on switch at home well.
+
+
+############### START CALLBACK FUNCTION ###################################################################################################################################
+
+
+# This function MUST BE NAMED 'callback'!!!!
+def callback(line):
+
+	# This is the custom callback function. When events occur, addScQtEvent will
+	# call this function. newLine is the last text string sent from the microcontroller
+
+	# this function keeps a record of the animal's choices and reward history,
+	# and tells the microcontroller which port to arm with reward for the next trial.
+
+	# the history is stored in the global variable scQtHistory for future use,
+	# and it is a 2-column matrix [choice reward]
+
+	# custom globals for this task
+	global rv
+	global trial
+	global startwait
+	global endwait
+	global posspairs
+	global correctwell
+
+	# new globals with sc import
+
+	# define all variables below as global
+
+	global jitter
+	global rewardlength
+	global rewardlengthmini
+	global rewardlengthhome
+	global rewardlengthback
+	global rewardlengthbackmini
+	global rewarddelay
+	global rewarddelayhome
+	global rewarddelayback
+	global cuelength
+	global backnum
+	global choicetimers
+	global backbaited
+	global lockout
+	global lickedwell
+	global leftcorrect
+	global deliveredwell
+
+	global rv
+	global backwell
+	global homewell
+	global correctpump
+	global correctpumpthistrial
+	global correctwell
+	global correctwellthistrial
+	global cuey
+	global cuen
+
+	global cueon
+	global homeon
+	global backon
+
+	global deliveringreward 
+	global deliveredreward
+	global isinbound 
+	global numtimers 
+	global thistrialcorrect
+
+	global trial
+	global corrects
+	global hits
+
+############################### end global definition for all sc variables 
+
+	# callback 7 up  ##############################################################################################
+
+	#print('callback rv:', rv)
+	#print('callback correctwell:', correctwell)
+
+	if line.find("reward delivery done!")>=0: # this needs to be split out so as not to set race conditions between the python resetting of vars like "correctwell" and the sc reward delivery fxn
+		print("correctwell: ", correctwell)
+
+		if deliveredwell == backnum: # if reward was just delivered at the back well, the correctwell will have been backnum.
+			print("Got callback that reward was delivered at back well!")
+			deliveringreward = 0
+			#reset state variables and turn on the home well 
+			leftcorrect = 0 #gets raised at unlick from choice well
+			correctwell = homewell  # this ensures that the following only runs once
+			print("correctwell: ", correctwell)
+			deliveredreward = 0 # gating variable for delivering reward ONCE at home well, flip as soon as homewell is turned on. correct case. error case below.
+			print("deliveredreward: ", deliveredreward)
+			numtimers = 0
+			print("SCQTMESSAGE: numtimers = " + str(int(numtimers)) + ";\n") # tell sc what numtimers is 
+			print("SCQTMESSAGE: portout[%d] = flip;\n" % (homewell+1)) # convert to SC 1-index
+			sys.stdout.flush()
+			homeon = 1 # turn ON home light.
+			backbaited = 0
+			#numtimers = 0 #this used to be following correct home poke, but I think that's wrong... # this is now done above, dependent only on first if.
+			#print("SCQTMESSAGE: numtimers = " + str(int(numtimers)) + ";\n") # tell sc what numtimers is 
+			#sys.stdout.flush()
+			thistrialcorrect = 0 #this is very important to reset after poke at back because otherwise we are vulnerable to the case in which 
+			# rat performs correct trial; skips home. thistrialcorrect = 0 is set at home, and in absence of this, no reward is delivered at subsequent
+			# choice poke, since correctwell = homewell, but following poke at choice, correctwell is reset to backwell. since thistrialcorrect is still = 1
+			# from the previous trial, reward is delivered at back. 
+
+		elif deliveredwell == homewell:
+				print("Got callback that reward was delivered at homewell!")
+				deliveringreward = 0            # no longer delivering reward
+				# note that deliveredreward still == 1 from just before the function call to sc and does not get reset here.
+
+		elif deliveredwell in [0,1,2,3,4,5]: # is the correctwell a choice well 
+				print("Got callback that reward was delivered at choice!")
+				deliveringreward = 0
+				# & turn the back light on after reward has been delivered at choice.
+				print("SCQTMESSAGE: portout[%d] = flip;\n" % (backwell +1)) #convert to sc-index
+				sys.stdout.flush()
+				correctwell = backnum #Set correct well to back after he repokes at choice. intuition this has to be after it's lit.
+				backon = 1 #python seems to check the contingencies are still true for every line in a block, so can't set backon to 1 until now.
+
+
+	elif line.find("backwell 6 licked")>=0:
+		print('GOT CALLBACK BACKWELL 7 LICKED!')
+		if backon==1:   #this contingency makes it so he can't poke at back until he has re-poked at choice, but version is not final (see p 75 redbook)
+			co.PLAYTONE = 0 
+
+		if correctwell == backnum:  #back well correctly triggered
+			isinbound = 0
+			numtimers = 0 #as long as back well was poked in the correct game sequence, set numtimers = 0 to prepare for home pokes.
+			print("numtimers: ", numtimers)
+			if backon == 1:
+				print("SCQTMESSAGE: portout[%d] = flip;\n" % (backwell+1)) # turn off back light. convert to SC 1-index.
+				sys.stdout.flush()
+				backon = 0 #assume backwell is on and turn it off rather than using a switch.
+				print('correctwell is:', correctwell+1) # convert to SC and human-readable 1-index.
+				sys.stdout.flush()
+			if thistrialcorrect == 1:
+				if deliveringreward == 0:                   	# if reward not already being delivered
+					deliveringreward = 1                    		# now delivering reward
+					correctpump = correctwell + homewell +1 +1        # determine correct output pump and convert to SC 1-index.
+					deliveredwell = correctwell 					# added by CGB, HX to debug
+					print('correct pump is:', correctpump)          
+					print('reward length at back is: %.3f' %rewardlengthback)
+					sys.stdout.flush()
+					print("SCQTMESSAGE: rewarddelay = %d;\n" %(rewarddelayback*1000)) # tell sc what rewarddelay is
+					sys.stdout.flush()
+					print("SCQTMESSAGE: correctpump = %d;\n" % correctpump) # tell sc what correctpump is
+					sys.stdout.flush()
+					print("SCQTMESSAGE: rewardlength = %d;\n" %(rewardlengthback*1000)) # tell sc what rewardlength is
+					sys.stdout.flush()
+					print("SCQTMESSAGE: trigger(5);\n") # delivers reward in sc
+					sys.stdout.flush()
+					# at the end of reward delivery from statescript via function 5, display 'reward delivery done', which triggers first callback (above)
+
+			else: # i.e., 'if thistrialcorrect !=1:' even in the case where the choice was not correct, reset state variables and turn on the home well 
+				backbaited = 0 # he will not be receiving reward at the back well if he preempted jitter, in which case thistrialcorrect == 0
+				leftcorrect = 0 #gets raised at unlick from choice well.
+				correctwell = homewell  # this ensures that the following only runs once
+				deliveredreward = 0 # gating variable for delivering reward ONCE at home well, flip as soon as homewell is turned on.
+				print("deliveredreward: ", deliveredreward)
+				numtimers = 0
+				print("SCQTMESSAGE: numtimers = " + str(int(numtimers)) + ";\n") # tell sc what numtimers is 
+				print("SCQTMESSAGE: portout[%d] = flip;\n" % (homewell+1)) # convert to SC 1-index
+				sys.stdout.flush()
+				homeon = 1 # turn ON home light.
+
+	# callback 8 up  ##############################################################################################
+
+	elif line.find("homewell 7 licked") >= 0:
+		print("backbaited: ", backbaited)
+		print("backon: ", backon)
+		print("deliveringreward: ", deliveringreward)
+
+		if backbaited == 0:
+			print('GOT CALLBACK HOMEWELL 8 LICKED!')
+			print('choicetimers at home: ', choicetimers)
+			sys.stdout.flush()
+
+			if correctwell == homewell: # Home well trigger is done correctly
+
+				# The following is just for cue jitter to work properly. Same as choicetimers, where relicking starts the jitter timer over again.
+				print("cueon", cueon)
+				print("isinbound", isinbound)
+				sys.stdout.flush()
+
+				# if cueon == 0: formerly this was here, but it prevents incrementing on licks after the first.
+				if isinbound == 0:
+					print("SCQTMESSAGE: trigger(1);\n") # increments numtimers in sc
+					sys.stdout.flush()
+
+				# turn off home light
+				if homeon == 1:
+					print("SCQTMESSAGE: portout[%d] = flip;\n" % (homewell+1)) # assume home light is on, convert to sc-readable 1-indexed.
+					sys.stdout.flush()
+
+					# all of this should be done only once, so exploit the homeon variable.
+					trial = trial + 1 
+					print('~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~* STARTING TRIAL NUMBER:', trial, '~~~*~~~*~~~*~~~*~~~*~~~*~~~*')
+					print('~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*TOTAL CORRECT TRIALS:', corrects, '~~~*~~~*~~~*~~~*~~~*~~~*~~~*')
+					print('~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*RECENCY VARIABLES:', rv, '~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*~~~*')
+					sys.stdout.flush()
+
+					homeon = 0
+					backbaited = 0 #this should be unnecessary...
+
+				# deliver reward, fxn 1
+				if deliveringreward == 0:               # if reward not already being delivered
+					print('deliveredreward: ', deliveredreward)
+					if deliveredreward == 0:
+						deliveringreward = 1  
+						deliveredreward = 1                  # now delivering reward
+						print('deliveredreward:', deliveredreward)
+						correctpump = correctwell + homewell +1 +1        # determine correct output pump and convert to SC 1-index.
+						deliveredwell = correctwell
+						print('correct pump is:', correctpump)          
+						print('reward length at home is: %.3f' %(rewardlengthhome*1000))
+						sys.stdout.flush()
+						
+						print("SCQTMESSAGE: rewarddelay = %d;\n" %(rewarddelayhome*1000)) # tell sc what rewarddelay is
+						sys.stdout.flush()
+						print("SCQTMESSAGE: correctpump = %d;\n" % correctpump) # tell sc what correctpump is
+						sys.stdout.flush()
+						print("SCQTMESSAGE: rewardlength = %d;\n" %(rewardlengthhome*1000)) # tell sc what rewardlength is
+						sys.stdout.flush()
+						print("SCQTMESSAGE: trigger(5);\n") # delivers reward in sc
+						sys.stdout.flush()
+						# at the end of reward delivery from statescript via function 5, display 'reward delivery done', which triggers first callback (above)
+		else:
+			print('GOT PREMATURE CALLBACK HOMEWELL 8 LICKED (reward being delivered at back)!')
+			print('choicetimers at home: ', choicetimers)
+			sys.stdout.flush()
+
+
+	# callback 8 down  ##############################################################################################
+
+	elif line.find("homewell 7 unlicked")>=0:
+
+		print('GOT CALLBACK HOMEWELL 8 UNLICKED!')
+		sys.stdout.flush()
+
+		# The following starts the jitter timer after the last unlick at home.
+		if cueon == 0:
+			if isinbound == 0:
+				print("SCQTMESSAGE: trigger(2);\n") # this decrements numtimers in sc
+				sys.stdout.flush()
+
+	# callback numtimers == 0 ############################################################################################
+	
+	elif line.find("numtimers = 0")>=0: # i don't know if this is the exact output of statescript.
+		if cueon == 0: # probably unnecessary
+			if isinbound == 0: # also probably unnecessary 
+
+				#generate cues for next session
+				print("running setwells_rv!")
+				sys.stdout.flush()
+				[cuey, cuen] = init_wells(rv, posspairs)
+				print("cuey, cuen:", cuey, ",", cuen)
+				sys.stdout.flush()
+				#immediately change the index into sc-readable 1-index for lighting wells
+				correctwell = cuey # 0-indexed.
+				jitter = set_jitter() # call the function that sets jitter 
+				#jitter = 10 # for debugging
+				print("jitter:", jitter) # choice well lights don't go on until the jitter time has passed
+				print("SCQTMESSAGE: jitter = " + str(int(jitter*1000)) + ";\n") # this gets used by numtimers in statescript. convert to milliseconds.
+				#[rewarddelay, rewardlength, rewardlengthback] = get_lengths() # call teh funciton that sets reward delays and amounts; in gambling these get overwritten			
+				thistrialcorrect = 0 # this is redundant with the reset that follows reward delivery at back. keep it just in case. 
+
+				# turn on the cue lights
+				print("SCQTMESSAGE: portout[%d] = flip;\n" % (cuey+1)) # convert to SC-readable 1-indexed
+				print("SCQTMESSAGE: portout[%d] = flip;\n" % (cuen+1)) # convert to SC-readable 1-indexed
+				# Choicetimers is used at choice well to determine gamble time. Before any pokes at choice, set choicetimers = 0
+				choicetimers = 0
+				print("SCQTMESSAGE: choicetimers = %d;\n" % choicetimers) # wait but is this the right itme? tell sc when it's set.
+				sys.stdout.flush()
+				cueon = 1
+
+	# callback choicewell lick ##############################################################################################
+
+	elif line.find("choicewell licked")>=0: 
+		# determine which choicewell was licked, as we detect only on "choicewell licked" but this is followed by a well number.
+		lickedwell = int(line[line.find("choicewell licked")+18]) # the output of sc is already 0-indexed well numbers.
+		print("GOT CALLBACK CHOICEWELL", lickedwell+1, "LICKED!")
+		print("leftcorrect: ", leftcorrect)
+
+	# start function 6  ##############################################################################################
+
+		if backon == 0: #this runs every time he pokes before the back well is on, increments choicetimers 
+			if leftcorrect != 1: # only increment if he hasn't left correct, in which case choicetimers has gone to 0 once.
+				print("choicetimers_PY before choice increment:", choicetimers)
+				print("incrementing choicetimers!")
+				print("SCQTMESSAGE: trigger(3);\n") # increments choicetimers
+				sys.stdout.flush()
+
+		print("isinbound", isinbound)
+
+		if isinbound == 0: # this is going to run first poke
+			rv = [n+1 for n  in rv] # increment the rv array  
+			rv[lickedwell] = 1 # then set the recency of the visited well = 1 
+			print("rv:", rv)
+			startwait = time.time() # this replaces the start wait value determined from sc output
+			print("startwait: %.3f" %startwait)
+			sys.stdout.flush()
+			correctwellthistrial = correctwell #correctwell is 0-indexed
+			correctpumpthistrial = correctwellthistrial + homewell +1 +1 #homewell and correctwell this trial are 0-indexed. convert to sc 1-index.
+			
+			if lickedwell == correctwell: # correctwell and lickedwell are both 0-indexed 
+				hits[lickedwell] = hits[lickedwell] + 1  
+				print('hits:', hits)
+				sys.stdout.flush()
+
+				# If correct well was licked, turn off choice well lights. 
+				
+				if cueon == 1: #adding these lines to turn off the choice well lights after correct lick. 
+					thistrialcorrect = 1 # only count the choice as correct if the cue lights were on at the time of choice poke. 
+					print("thistrialcorrect: ", thistrialcorrect)
+					print("SCQTMESSAGE: portout[%d] = flip;\n" % (cuey+1)) #convert to sc-readable 1-index.
+					print("SCQTMESSAGE: portout[%d] = flip;\n" % (cuen+1))       
+					sys.stdout.flush()
+					cueon = 0 
+
+					backbaited = 1      #Raise backbaited, which gates reward delivery at the back well. do so only if the cue lights are on. this makes many of the other backbacked = 0 later on redundant. 
+				
+				if numtimers == 0: 
+					corrects = corrects + 1
+					sys.stdout.flush()
+
+				if numtimers !=0:
+					print('did not wait for jitter') # don't count it as a correct trial if rat guessed the correct choice well by chance, before it was lit.   
+					sys.stdout.flush()
+
+			isinbound = 1
+
+			#UNCOMMENT THIS BLOCK TO PLAY CHIRP			
+			# start the chirp playing for the first choicewell lick regardless of correct vs incorrect  
+			#co.PLAYCHIRP = 1 #should only begin playing the chirp, since that comes first (multi_thread_chirp_x4hj2_gamble.py)
+			#background = AsyncChirp(300)
+			#background.start() #this starts at the same time as the sleep timer below
+			#print('Have just set PLAYCHIRP = ', co.PLAYCHIRP)   
+			#sys.stdout.flush()
+
+
+			if lickedwell != correctwell:       # If an incorrect well was licked
+
+				if correctwell == homewell: # Woops, the rat skipped home well and poked a choice well before they were lit.   
+					print("SCQTMESSAGE: portout[%d] = flip;\n" % (homewell+1))  # call the sc function that turns off the home light, converted to sc 1-index.
+					sys.stdout.flush()
+					homeon = 0 # rather than including the whole switch, assume that home light is on and needs to be shut off 
+
+				else:           # The rat did not skip home well, licked an incorrect well
+					if cueon == 1: 
+						print("SCQTMESSAGE: portout[%d] = flip;\n" % (cuey+1)) #convert to sc-readable 1-index.
+						print("SCQTMESSAGE: portout[%d] = flip;\n" % (cuen+1))       
+						sys.stdout.flush()
+						cueon = 0 
+
+		elif leftcorrect == 1: # this means that he has unlicked at a choice well and choicetimers has gone to 0. # LEGACY COMMENT: changed from isinbound = 1 
+
+			# start the tone
+			# co.PLAYTONE = 1 #IF YOU WANT THE TONE, UNCOMMENT THIS AND OTHER INSTANCES BELOW. THIS IS A GLOBAL CONFIG SWITCH FOR PLAYING TONE.
+			#print("set co.PLAYTONE=1") # but playtone is being set to 1 in two places...is this why sometimes the freq is off?
+			#sys.stdout.flush()
+			if correctwellthistrial == lickedwell:
+				print("thistrialcorrect: ", thistrialcorrect)
+				if thistrialcorrect == 1:
+					print('backon: ', backon)
+					if backon==0:           #Since this turns the back light on, it will only run on the first repoke at correct well after choicetimers == 0
+						if cueon==1:
+							print("SCQTMESSAGE: portout[%d] = flip;\n" % (lickedwell +1)) #turns the choice light off  -  it is set on at the choicetimers == 0 callback below
+							sys.stdout.flush()
+							cueon = 0 # the choice well is off  
+
+					# deliver reward at the choice well, function 1
+						print("correctwellthistrial: ", correctwellthistrial)
+						print("lickedwell (same as correctwellthistrial?): ", lickedwell)
+						print("delivering reward (at choice well):", deliveringreward)
+						sys.stdout.flush()
+
+						if deliveringreward == 0:               # if reward not already being delivered
+							deliveringreward = 1                    # now delivering reward
+							correctpump = correctwell + homewell +1 +1        # determine correct output pump and convert to SC 1-index.
+							deliveredwell = correctwell
+							print('correct pump is:', correctpump)          
+							print('reward length at choice is: %.3f' %rewardlengthback)
+							sys.stdout.flush()
+							print ("SCQTMESSAGE: rewarddelay = %d;\n" %(rewarddelay*1000)) # tell sc what rewarddelay is in milliseconds
+							sys.stdout.flush()
+							print("SCQTMESSAGE: correctpump = %d;\n" % correctpump) # tell sc what correctpump is
+							sys.stdout.flush()
+							print("SCQTMESSAGE: rewardlength = %d;\n" %(rewardlengthback*1000)) # tell sc what rewardlength is
+							sys.stdout.flush()
+							print("SCQTMESSAGE: trigger(5);\n") # delivers reward in sc
+							sys.stdout.flush()
+							# at the end of reward delivery from statescript via function 5, display 'reward delivery done', which triggers first callback (above)
+
+				if thistrialcorrect == 0:
+					backbaited = 0 # another reason the back well may not be baited is if he preempted jitter, in which case thistrialcorrect == 0.
+
+			if correctwellthistrial != lickedwell:
+				backbaited = 0 #blocks reward if there is any poke at a well other than correctwell after the first poke. is not setting backbaited = 0, tone continues.
+
+	# end function 6 #################################################################################################
+
+	# callback choicewell unlick ##############################################################################################
+
+	elif line.find("unlicked choicewell")>=0:
+		unlickedwell = int(line[line.find("unlicked choicewell")+20]) # is it important that lickedwell and unlickedwell be saved separately? 
+		print('GOT CALLBACK AT CHOICEWELL', unlickedwell+1, 'UNLICKED!')
+		sys.stdout.flush()
+		# the rat might poke at a choice well then go to a different choice well for fun. 
+		# you have to weed those pokes out so function 6 and function 7 do nothing at non-OG choice wells. 
+
+		if backon == 0: # choicetimers keeps incrementing and decrementing even during reward delivery (backon=1 at end reward), but this doesn't matter.
+			if leftcorrect!=1:
+				print("decrementing choicetimers!")
+				print("SCQTMESSAGE: trigger(4);\n") # decrements choicetimers
+				sys.stdout.flush()
+
+	# callback choicetimers == 0 ######################################################################################################
+
+	elif line.find("choicetimers = 0")>=0: # not sure on the exact wording
+		print("found choicetimers = 0!")
+		choicetimers = 0 # set python choicetimers = 0, too
+
+		#co.PLAYCHIRP = 0 # stop the chirp 
+		#print('Have just set PLAYCHIRP = ', co.PLAYCHIRP)
+		#print('end wait line, INCORRECT TRIAL, is', line) 
+		#print('end wait value, INCORRECT TRIAL, is', line.split()[0]) #debug
+		sys.stdout.flush()
+		#endwait = int(line.split()[0])
+
+		# start the tone
+		if thistrialcorrect == 1:
+			leftcorrect = 1
+			print('leftcorrect:', leftcorrect)
+			co.PLAYTONE = 1
+			print("set co.PLAYTONE=1")
+			sys.stdout.flush()
+
+			print("lickedwell:", lickedwell)
+			print("correctwellthistrial: ", correctwellthistrial)
+
+			if lickedwell == correctwellthistrial:
+				if cueon==0:
+					print("SCQTMESSAGE: portout[%d] = flip;\n" % (lickedwell+1)) # turn the light back on if the licked well was correct 
+					sys.stdout.flush()
+					cueon = 1
+				
+				endwait = time.time()
+				print("end wait: %.3f" %endwait)
+				print("start wait: %.3f" %startwait)
+		
+				
+				rewardlengthbackwait = (endwait - startwait)
+				print("rewardlengthbackwait: %.3f" %rewardlengthbackwait)
+				sys.stdout.flush()
+
+				if rewardlengthbackwait <=3: 
+					rewardlengthback = (0.27*math.e**(0.34055*rewardlengthbackwait))  #new reward fxn for tubman, less R:(0,0.27), (3,0.75)
+
+				else:
+					rewardlengthback = 2.59984*math.log(0.444799*rewardlengthbackwait) #(3,0.75), (8,3.3)
+
+
+				co.WAITLENGTH_incorrect = (endwait - startwait) # should likewise print the waitlength for incorrect trials as for corrects 
+				co.WAITLENGTH = (endwait-startwait) #/1000 i think values are in s, but use this to get to s if in ms, convert to seconds because this gets passed to chirp2tone (1 of 2 set)
+				print('time gambled and rewardlengthback are', rewardlengthback)
+				sys.stdout.flush()
+				#print "SCQTMESSAGE: rewardlength = %d;\n" %rewardlength #this is read by statescript to deliver reward length at choice.
+				#print("SCQTMESSAGE: rewardlengthback = %d;\n" %rewardlengthback) #this can be read by statescript, it's a new variable set (2 of 2 set)
+				timerdone = 1
+				#print("SCQTMESSAGE: timerdone = %d;\n" % timerdone)
+
+
+			else: #lickedwell != correctwellthistrial, so he relicked at another well after making a correct choice
+				print("SCQTMESSAGE: portout[%d] = flip;\n" % (backwell+1))
+				sys.stdout.flush()
+				# in python, the tracking variable for off/on 
+				backon = 1 #formerly a flip
+				correctwell = backnum   # Set correct well to back after he repokes at choice. 
+
+		else: # thistrialcorrect !=1, so he did not wait for jitter when making the initial choice and shouldn't be rewarded
+			print("SCQTMESSAGE: portout[%d] = flip;\n" % (backwell+1))
+			sys.stdout.flush()
+			# in python, the tracking variable for off/on 
+			backon = 1 # used to do a flip. 
+			correctwell = backnum   # Set correct well to back after he repokes at choice. 
+
+
+#############################
+# functions for generation of game parameters.
+
+#modifiable well selection based geometry with difficulty thresholds in two recency axes.
+
+distractors = []   
+history = []
+recencyhistory=[]
+posspairs = np.array([[0,1], [1,2], [2,3], [3,4], [4,5], [5,0]])
+rv = [101, 101, 101, 101, 101, 101]
+
+def set_wells(rv, posspairs):
+   
+	 #representing the six possible pairs
+#    print('posspairs length', len(posspairs))
+
+	#modify posspairs based on recency - do it for each pair then for each iteration, index in again
+	candidates = []
+	recOfCan=[]
+	for i in range(len(posspairs)):
+		fpair = posspairs[i]
+		rv0 = fpair[0]
+		rv1 = fpair[1]
+
+		recemax = 4 #set the maximum allowable recency value of the distractor (more recent) cue
+
+		if min(rv[rv0],rv[rv1]) < recemax: 
+			candidates+=[posspairs[i]]
+			recOfCan.append(min(rv[rv0],rv[rv1]))
+			#candidates = np.delete(candidates, i,0) #modify posspairs
+			pass
+		pass
+#    print('candidates', candidates)
+	
+
+	#select chosenpair
+	for i in recencyhistory[0:recemax-2]:
+		if len(recOfCan)==1:
+			break;
+		elif len(recOfCan)==2 and recOfCan[0]==recOfCan[1]:
+			break;
+		elif recOfCan.count(i)!=0:
+			del candidates[recOfCan.index(i)]
+			recOfCan.remove(i)
+			if len(recOfCan)==1:
+				break;
+			elif recOfCan.count(i)!=0:
+				del candidates[recOfCan.index(i)]
+				recOfCan.remove(i)
+
+	chosenpair = candidates[np.random.choice(len(candidates))] #selects from what remains in the posspairs list
+
+	firstchoice = chosenpair[0]
+	secondchoice = chosenpair[1]
+#    print('firstchoice', firstchoice, 'secondchoice', secondchoice)
+
+	# Now we need to figure out which one is cuey and which one is cuen
+	if rv[firstchoice] > rv[secondchoice]: 
+		target = firstchoice 
+		distractor = secondchoice
+	else:
+		target = secondchoice 
+		distractor = firstchoice 
+
+#    print('target', target, 'distractor', distractor) #change to human readable index
+
+	# increment chosenpairs
+	distractors.insert(0, distractor)    #distractor is the well number
+#    print('distractors', distractors)
+
+	recencyhistory.insert(0,rv[distractor])   # rv[distractor] is the actual recency value
+
+	# increment history
+	history.insert(0, target)
+#    print('history', history)
+
+	return [target, distractor] #these get read by statescript as cuey and cuen, in that order 
+
+# track recency for each of the wells
+def init_wells(rv, posspairs): #recencies must be a list of the recencies for wells in increasing well number
+	wells = list(np.arange(6)) #initialize list of wells at start of session
+	visited = [] #recheck on every trial which wells have been visited
+	for i in wells:
+		if rv[i] < 100:
+			visited.append(i)
+#    print('visited',visited) #it prints every time another well of the 6 is checked, so 6 total print statements
+	
+	if not visited or len(visited) < 6:  # first trial of the epoch, no recency will be less than 100!
+		print('initializing. not all wells yet visited.') #randomly select a single well until all six have been selected
+		allwells = np.arange(6)
+		unvisited = [x for x in allwells if x not in visited] # find unique values in the visited list, remove these from unvisited which is (0,5), select one
+		return [np.random.choice(unvisited), -1]
+	   
+	else:
+		[cuey, cuen] = set_wells(rv, posspairs) 
+		return [cuey, cuen]
+
+
+# Function: Set jitter time in ms
+def set_jitter():
+	j = np.random.exponential()
+	if 0.5 < j < 2:
+		return j
+	else:
+		return set_jitter()
+
+
+# Function: Set delay and reward lengths in ms
+def get_lengths(): #formerly 'set_lengths in non-gambling version'. in gambling version, this gets overwritten.
+	j = np.random.exponential(scale=2)
+#   k = np.random.choice(10,1) #chooses one value from arange(5), which starts at 0.
+	if 3 < j < 10:
+		return [j, 0, j*0.5] #rewardlength is always set to 0 in this current setup.
+#   return [j*1000, j*100, j*500] #comment out in probabilistic reward reduction steps
+
+#   if k != 0:
+#           return [j*1000, j*100, j*500] 
+
+#   else:
+#       return [j*1000, 0, j*500] #reward delay, reward length at choice, reward length at back (overwritten in gambling version based on actual wait at choice)
+#           EXAMPLE return [j*1000, 0, j*1000] #for example, reward length at back equal in time to wait at choice, 0 reward at choice
+	else:
+		return get_lengths()
+
+
+
+
+
